@@ -12,7 +12,7 @@
 
 ## 📋 Visão Geral do Projeto
 
-Este repositório contém um **Pipeline de Engenharia e Governança de Dados** completo de ponta a ponta (*End-to-End*), desenvolvido para resolver um dos problemas mais críticos e complexos de instituições financeiras e corretoras de câmbio: a **Conciliação Automatizada de Transações em Larga Escala**.
+Este repositório contém um **Pipeline de Engenharia e Governança de Dados** completo de ponta a ponta, desenvolvido para resolver um dos problemas mais críticos e complexos de instituições financeiras e corretoras de câmbio: a **Conciliação Automatizada de Transações em Larga Escala**.
 
 O objetivo principal deste projeto é atuar como um motor customizado de auditoria interna, capaz de receber milhares de registros brutos de vendas (sistemas internos) e confrontá-los com os extratos consolidados dos bancos liquidantes. O sistema identifica discrepâncias de valores causadas por tarifas ocultas, atrasos de processamento bancário e transações não reconhecidas, gerando métricas de eficiência operacional e logs de auditoria automatizados.
 
