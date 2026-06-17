@@ -57,33 +57,115 @@ A organização das pastas e arquivos segue uma ordem cronológica estrita de ex
 ## 🛠️ Detalhamento Prático Passo a Passo
 
 ### 1. Geração de Dados e Injeção de Anomalias (`1_gerador_dados.py`)
-Para testar a resiliência física do banco de dados, este script Python utiliza a biblioteca `Faker` para criar **15.000 transações financeiras diárias fictícias altamente realistas**, injetando anomalias intencionais simulando falhas operacionais reais:
+Para testar a resiliência física do banco de dados, este script Python utiliza a biblioteca `Faker` para criar **15.000 transações financeiras diárias fictícias altamente realistas**, injetando anomalias intencionais para simular falhas operacionais reais:
 * **Sujeira Cadastral:** CPFs gerados com e sem pontuação aleatoriamente para forçar tratamento de strings.
-* **Transações Órfãs:** Cerca de 5% das transações enviadas internamente são removidas do extrato bancário (simulando quebra de fluxo ou falha no gateway).
+* **Transações Órfãs:** Cerca de 5% das transações enviadas internamente são removidas do extrato bancário (simulando quebra de fluxo).
 * **Atraso de Processamento:** Transações bancárias recebem um atraso aleatório de até 3 dias úteis em relação à venda interna.
 * **Divergência de Tarifas:** Cerca de 10% das transações sofrem descontos arbitrários de R$ 1,50 a R$ 5,00 no valor do banco, simulando taxas bancárias não provisionadas.
+
+```python
+# Snippet do laço de geração e injeção de anomalias de valores
+for i in range(1, QTD_TRANSACOES + 1):
+    id_transacao = f"TRX-{str(i).zfill(6)}"
+    data_venda = fake.date_between(start_date='-30d', end_date='today')
+    cpf = fake.cpf() if random.choice([True, False]) else fake.cpf().replace('.', '').replace('-', '')
+    valor_brl = round(random.uniform(500.0, 15000.0), 2)
+    dados_internos.append([id_transacao, data_venda, cpf, tipo_op, moeda, valor_brl])
+
+    if random.random() < 0.05:
+        continue # Simula transação órfã (não chega no banco)
+
+    # Simula divergência de taxas bancárias
+    valor_recebido = valor_brl
+    if random.random() < 0.10:
+        valor_recebido = round(valor_recebido - random.uniform(1.50, 5.00), 2)
+    dados_banco.append([id_transacao, data_processamento, valor_recebido])
+```
 
 ### 2. Infraestrutura e Área de Pouso (`2_setup_banco.sql`)
 Criação física da base de dados e das tabelas de **Staging (`stg_`)**. Seguindo as melhores práticas de Engenharia de Dados, as tabelas de staging atuam como zonas de pouso de dados brutos e possuem tipagem flexível (`VARCHAR`), sem chaves primárias restritivas, para garantir que nenhuma carga falhe devido à despadronização dos arquivos de origem.
 
+```sql
+CREATE DATABASE ProjetoConciliacao;
+GO
+USE ProjetoConciliacao;
+GO
+
+CREATE TABLE stg_base_interna (
+    ID_Transacao VARCHAR(50),
+    Data_Venda DATE,
+    CPF_Cliente VARCHAR(20),
+    Tipo_Operacao VARCHAR(50),
+    Moeda_Estrangeira VARCHAR(10),
+    Valor_BRL DECIMAL(10,2)
+);
+```
+
 ### 3. Pipeline de Carga ETL (`3_ingestao_dados.py`)
 Script automatizado que lê os arquivos locais `.csv`, abre uma conexão segura com o Microsoft SQL Server via `SQLAlchemy/pyodbc` utilizando autenticação integrada do Windows, e realiza o carregamento em lote utilizando performance otimizada com o método `.to_sql()`.
 
-### 4. Motor de Regras e Auditoria (`4_3_logica_conciliacao.sql`)
-O coração analítico do projeto é a Stored Procedure **`sp_conciliar_dattos`**. Ela executa comandos DML pesados e realiza um `LEFT JOIN` entre as tabelas de staging. O motor categoriza cada registro em tempo de execução utilizando uma estrutura condicional `CASE WHEN`:
-* **Conciliado Automático:** ID da transação e valor exato batem 100%.
-* **Divergência de Valor/Taxa:** O ID existe de ambos os lados, mas o valor creditado no banco é menor.
-* **Não Encontrado no Banco:** A transação foi efetuada internamente, mas o dinheiro nunca deu entrada no banco liquidante.
+```python
+# Conexão via SQLAlchemy e inserção em lote (Bulk Insert)
+params = urllib.parse.quote_plus(
+    'DRIVER={SQL Server};SERVER=localhost;DATABASE=ProjetoConciliacao;Trusted_Connection=yes;'
+)
+engine = create_engine(f"mssql+pyodbc:///?odbc_connect={params}")
 
-Toda execução armazena o histórico quantitativo na tabela de governança `tb_log_auditoria`, registrando a data/hora exata, total processado, sucessos e falhas estruturadas.
+# Carga de Staging com estratégia de Append
+df_interna.to_sql('stg_base_interna', engine, if_exists='append', index=False)
+df_banco.to_sql('stg_extrato_banco', engine, if_exists='append', index=False)
+```
+
+### 4. Motor de Regras e Auditoria (`4_3_logica_conciliacao.sql`)
+O coração analítico do projeto é uma **Stored Procedure**. Ela executa comandos DML pesados e realiza um `LEFT JOIN` entre as tabelas de staging. O motor categoriza cada registro em tempo de execução utilizando uma estrutura condicional `CASE WHEN` e salva o histórico quantitativo na tabela de governança `tb_log_auditoria`.
+
+```sql
+-- Lógica central de cruzamento e classificação de status
+INSERT INTO tb_conciliacao_resultado (...)
+SELECT 
+    i.ID_Transacao,
+    i.Data_Venda,
+    i.Valor_BRL AS Valor_Sistema,
+    b.Valor_Recebido AS Valor_Banco,
+    ISNULL(i.Valor_BRL - b.Valor_Recebido, i.Valor_BRL) AS Diferenca_Valor,
+    CASE 
+        WHEN b.ID_Transacao IS NULL THEN 'Não Encontrado no Banco'
+        WHEN i.Valor_BRL = b.Valor_Recebido THEN 'Conciliado Automático'
+        ELSE 'Divergência de Valor/Taxa'
+    END AS Status_Conciliacao
+FROM stg_base_interna i
+LEFT JOIN stg_extrato_banco b ON i.ID_Transacao = b.ID_Transacao;
+```
 
 ### 5. Visões Operacionais de Governança (`4_4_views_relatorios.sql`)
-Em vez de depender de interfaces visuais de terceiros, o projeto consolida as métricas críticas em duas **Views de Banco de Dados** de alto desempenho:
-1. **`vw_relatorio_eficiencia_processo`**: Transforma números brutos em indicadores de desempenho (KPIs), calculando em tempo real a *Taxa de Acerto %*, *Taxa de Divergência %* e *Taxa de Ausência no Banco %*.
-2. **`vw_auditoria_critica_perdas`**: Mapeia cirurgicamente todas as transações com diferenças de valores, ordenando o prejuízo absoluto e calculando o **Percentual de Impacto** financeiro sobre o valor original da venda, permitindo que o time de Governança foque nos desvios mais críticos.
+O projeto consolida as métricas críticas em **Views de Banco de Dados** de alto desempenho, permitindo avaliar a saúde da operação com um simples `SELECT` gerencial.
+
+```sql
+CREATE OR ALTER VIEW vw_relatorio_eficiencia_processo AS
+SELECT 
+    ID_Log,
+    CONVERT(VARCHAR, Data_Execucao, 103) AS Data_Processamento,
+    Total_Processado,
+    ROUND((CAST(Total_Conciliado AS FLOAT) / Total_Processado) * 100, 2) AS Taxa_Acerto_Percentual,
+    ROUND((CAST(Total_Divergencia AS FLOAT) / Total_Processado) * 100, 2) AS Taxa_Divergencia_Percentual,
+    ROUND((CAST(Total_Faltante_Banco AS FLOAT) / Total_Processado) * 100, 2) AS Taxa_Ausencia_Banco_Percentual
+FROM tb_log_auditoria;
+```
 
 ### 6. O Orquestrador Unificado (`5_automacao_main.py`)
-O "Maestro" do projeto. Um script centralizado que realiza a automação completa do pipeline. Ao ser executado, ele aciona sequencialmente todas as etapas por meio de chamadas de sistema, limpa a memória do terminal e dispara a execução remota da Stored Procedure dentro do SQL Server, reduzindo o esforço operacional de processamento de dados diários para **um único clique**.
+O "Maestro" do projeto. Um script centralizado que realiza a automação completa do pipeline. Ao ser executado, ele aciona sequencialmente todas as etapas por meio de chamadas de sistema, limpa a memória do terminal e dispara a execução remota da Stored Procedure dentro do SQL Server, reduzindo o esforço operacional de processamento de dados para **um único clique**.
+
+```python
+# Execução sequencial e centralizada de toda a esteira de dados
+def executar_automacao():
+    os.system('python 1_gerador_dados.py') # Gera os arquivos
+    os.system('python 3_ingestao_dados.py') # Ingestão via ETL
+    
+    # Execução da inteligência direto no banco de dados
+    with engine.begin() as conn:
+        conn.execute(text("EXEC sp_conciliar_transacoes"))
+    print("✅ Pipeline executado e finalizado com sucesso!")
+```
 
 ---
 
