@@ -34,3 +34,8 @@ GO
 
 SELECT * FROM vw_relatorio_eficiencia_processo;
 SELECT TOP 20 * FROM vw_auditoria_critica_perdas ORDER BY Prejuizo_Taxa_BRL DESC;
+GO
+
+TRUNCATE TABLE stg_base_interna;
+TRUNCATE TABLE stg_extrato_banco;
+GO
