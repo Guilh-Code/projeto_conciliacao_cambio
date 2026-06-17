@@ -188,12 +188,11 @@ Após a orquestração do pipeline, o painel interno de controle de Governança 
 
 ## 🧠 Lições Aprendidas & Engenharia de Produção
 
-### ⚠️ O Fenômeno da Explosão Cartesiana
-Durante os testes de estresse da automação, foi identificado um comportamento anômalo: ao reexecutar o orquestrador sequencialmente sem a limpeza prévia das tabelas de staging, o volume de dados divergiu exponencialmente (pulando de 15.000 para mais de 290.000 registros). 
+Durante o desenvolvimento deste projeto, saí da zona de conforto de apenas executar consultas básicas de visualização e mergulhei na arquitetura de uma solução de dados real. As principais lições consolidadas foram:
 
-**Diagnóstico Técnico:** Como o gerador recriava IDs semelhantes e o script de ingestão aplicava um comando de `append` (acumulando dados históricos de staging), o `LEFT JOIN` da Procedure gerou um produto cartesiano ao cruzar múltiplas chaves repetidas em ambos os lados da equação.
-
-**Resolução Aplicada:** Implementou-se uma regra de governança rígida na arquitetura: **as tabelas de Staging são efêmeras**. Adicionou-se o comando `TRUNCATE TABLE` no início da rotina de conciliação e ingestão, garantindo que a área de pouso seja totalmente limpa a cada novo ciclo de processamento, assegurando a idempotência do pipeline de dados.
+* **O Poder do SQL além do `SELECT`:** Aprendi a estruturar um banco de dados do zero, criando tabelas de *Staging* para receber arquivos brutos e construindo *Stored Procedures* (robôs de banco de dados). Entendi na prática como utilizar `LEFT JOIN` e `CASE WHEN` para criar regras de negócio robustas que cruzam bases e classificam status de forma massiva.
+* **A Lógica da Conciliação Financeira:** Compreendi o núcleo da Governança de Dados. Conciliar não é apenas fazer os números "baterem", mas sim mapear e auditar os desvios: identificar taxas bancárias não previstas, transações órfãs e atrasos de processamento, registrando tudo em logs automatizados para garantir a integridade financeira.
+* **Visão Macro de Automação com Python:** Mesmo utilizando inteligência artificial como apoio para a sintaxe avançada do código, consolidei o entendimento lógico de como o Python atua como o "maestro" de um pipeline (ETL). Entendi perfeitamente como ele pode simular a chegada de dados, conectar-se ao banco para fazer a ingestão e acionar rotinas SQL de forma sequencial, transformando um processo manual e demorado em uma execução de um único clique.
 
 ---
 
