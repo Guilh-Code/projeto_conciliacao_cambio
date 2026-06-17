@@ -69,7 +69,7 @@ Criação física da base de dados e das tabelas de **Staging (`stg_`)**. Seguin
 ### 3. Pipeline de Carga ETL (`3_ingestao_dados.py`)
 Script automatizado que lê os arquivos locais `.csv`, abre uma conexão segura com o Microsoft SQL Server via `SQLAlchemy/pyodbc` utilizando autenticação integrada do Windows, e realiza o carregamento em lote utilizando performance otimizada com o método `.to_sql()`.
 
-### 4. Motor de Regras e Auditoria (`4_logica_conciliacao.sql`)
+### 4. Motor de Regras e Auditoria (`4_3_logica_conciliacao.sql`)
 O coração analítico do projeto é a Stored Procedure **`sp_conciliar_dattos`**. Ela executa comandos DML pesados e realiza um `LEFT JOIN` entre as tabelas de staging. O motor categoriza cada registro em tempo de execução utilizando uma estrutura condicional `CASE WHEN`:
 * **Conciliado Automático:** ID da transação e valor exato batem 100%.
 * **Divergência de Valor/Taxa:** O ID existe de ambos os lados, mas o valor creditado no banco é menor.
@@ -77,7 +77,7 @@ O coração analítico do projeto é a Stored Procedure **`sp_conciliar_dattos`*
 
 Toda execução armazena o histórico quantitativo na tabela de governança `tb_log_auditoria`, registrando a data/hora exata, total processado, sucessos e falhas estruturadas.
 
-### 5. Visões Operacionais de Governança (`4_3_views_relatorios.sql`)
+### 5. Visões Operacionais de Governança (`4_4_views_relatorios.sql`)
 Em vez de depender de interfaces visuais de terceiros, o projeto consolida as métricas críticas em duas **Views de Banco de Dados** de alto desempenho:
 1. **`vw_relatorio_eficiencia_processo`**: Transforma números brutos em indicadores de desempenho (KPIs), calculando em tempo real a *Taxa de Acerto %*, *Taxa de Divergência %* e *Taxa de Ausência no Banco %*.
 2. **`vw_auditoria_critica_perdas`**: Mapeia cirurgicamente todas as transações com diferenças de valores, ordenando o prejuízo absoluto e calculando o **Percentual de Impacto** financeiro sobre o valor original da venda, permitindo que o time de Governança foque nos desvios mais críticos.
