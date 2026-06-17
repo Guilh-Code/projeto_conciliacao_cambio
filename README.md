@@ -99,6 +99,12 @@ CREATE TABLE stg_base_interna (
     Moeda_Estrangeira VARCHAR(10),
     Valor_BRL DECIMAL(10,2)
 );
+
+CREATE TABLE stg_extrato_banco (
+    ID_Transacao VARCHAR(50),
+    Data_Processamento DATE,
+    Valor_Recebido DECIMAL(10,2)
+);
 ```
 
 ### 3. Pipeline de Carga ETL (`3_ingestao_dados.py`)
@@ -135,12 +141,35 @@ SELECT
     END AS Status_Conciliacao
 FROM stg_base_interna i
 LEFT JOIN stg_extrato_banco b ON i.ID_Transacao = b.ID_Transacao;
+
+
+DECLARE @TotalProcessado INT = (SELECT COUNT(*) FROM stg_base_interna);
+    DECLARE @TotalConciliado INT = (SELECT COUNT(*) FROM tb_conciliacao_resultado WHERE Status_Conciliacao = 'Conciliado Automático');
+    DECLARE @TotalDivergencia INT = (SELECT COUNT(*) FROM tb_conciliacao_resultado WHERE Status_Conciliacao = 'Divergência de Valor/Taxa');
+    DECLARE @TotalFaltante INT = (SELECT COUNT(*) FROM tb_conciliacao_resultado WHERE Status_Conciliacao = 'Não Encontrado no Banco');
+
+    INSERT INTO tb_log_auditoria (Total_Processado, Total_Conciliado, Total_Divergencia, Total_Faltante_Banco)
+    VALUES (@TotalProcessado, @TotalConciliado, @TotalDivergencia, @TotalFaltante);
 ```
 
 ### 5. Visões Operacionais de Governança (`4_4_views_relatorios.sql`)
 O projeto consolida as métricas críticas em **Views de Banco de Dados** de alto desempenho, permitindo avaliar a saúde da operação com um simples `SELECT` gerencial.
 
 ```sql
+-- 1. View de análise de risco e impacto financeiro
+CREATE OR ALTER VIEW vw_auditoria_critica_perdas AS
+SELECT
+    ID_Transacao,
+    Data_Venda,
+    Valor_Sistema,
+    Valor_Banco,
+    Diferenca_Valor AS Prejuizo_Taxa_BRL,
+    ROUND((Diferenca_Valor / Valor_Sistema) * 100, 2) AS Percentual_Impacto
+FROM tb_conciliacao_resultado
+WHERE Status_Conciliacao = 'Divergência de Valor/Taxa'
+
+
+-- 2. Viwe de Metricas de Eficiência
 CREATE OR ALTER VIEW vw_relatorio_eficiencia_processo AS
 SELECT 
     ID_Log,
